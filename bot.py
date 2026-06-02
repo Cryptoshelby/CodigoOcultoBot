@@ -3,11 +3,10 @@ import logging
 import json
 import threading
 from flask import Flask
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 TOKEN = "8991788772:AAEy4xMXBTlhr4odaVXN1DaSX1CbfMtlxEU"
-CHANNEL_ID = -1003948185788
+CHANNEL_ID = "-1003948185788"
 LIMITE_REACCIONES = 50
 
 logging.basicConfig(level=logging.INFO)
@@ -15,9 +14,9 @@ logging.basicConfig(level=logging.INFO)
 ARCHIVO_ESTADO = "estado_posts.json"
 
 CADENA_CONTENIDO = [
-    {"id": 1, "texto": "🤖 **IA SIN FILTROS - Parte 1**\n\nNuevo jailbreak para ChatGPT.\n\n⭐ Reacciona con CUALQUIER REACCIÓN. Al llegar a 50, publico la Parte 2."},
-    {"id": 2, "texto": "💀 **TRUCO QUE NADIE SABÍA - Parte 2**\n\nEn WhatsApp, escribe `*texto*` para **negritas**.\n\n⭐ Siguiente parte en 50 reacciones."},
-    {"id": 3, "texto": "📱 **APP MOD ACTUALIZADA - Parte 3**\n\nYouTube ReVanced v19.09.37\n✅ Sin anuncios\n\n⭐ Parte 4 al llegar a 50 reacciones."},
+    "🤖 **IA SIN FILTROS - Parte 1**\n\nNuevo jailbreak para ChatGPT.\n\n⭐ Reacciona con CUALQUIER REACCIÓN. Al llegar a 50, publico la Parte 2.",
+    "💀 **TRUCO QUE NADIE SABÍA - Parte 2**\n\nEn WhatsApp, escribe `*texto*` para **negritas**.\n\n⭐ Siguiente parte en 50 reacciones.",
+    "📱 **APP MOD ACTUALIZADA - Parte 3**\n\nYouTube ReVanced v19.09.37\n✅ Sin anuncios\n\n⭐ Parte 4 al llegar a 50 reacciones.",
 ]
 
 def cargar_estado():
@@ -31,18 +30,15 @@ def guardar_estado(estado):
     with open(ARCHIVO_ESTADO, 'w') as f:
         json.dump(estado, f)
 
-async def start(update: Update, context):
-    await update.message.reply_text("🔓 Bot activo. Reacciona en el canal para desbloquear contenido.")
-
-async def publicar_siguiente(context):
+def publicar_siguiente(context):
     estado = cargar_estado()
     siguiente_id = estado["ultimo_post_id"] + 1
     
     if siguiente_id <= len(CADENA_CONTENIDO):
-        contenido = CADENA_CONTENIDO[siguiente_id - 1]
-        mensaje = await context.bot.send_message(
+        texto = CADENA_CONTENIDO[siguiente_id - 1]
+        mensaje = context.bot.send_message(
             chat_id=CHANNEL_ID, 
-            text=contenido["texto"], 
+            text=texto, 
             parse_mode='Markdown'
         )
         estado["ultimo_post_id"] = siguiente_id
@@ -51,13 +47,16 @@ async def publicar_siguiente(context):
         guardar_estado(estado)
         logging.info(f"✅ Publicado Post {siguiente_id}")
 
-async def manejar_reacciones(update: Update, context):
-    if not update.message_reaction:
+def start(update, context):
+    update.message.reply_text("🔓 Bot activo. Reacciona en el canal para desbloquear contenido.")
+
+def manejar_reacciones(update, context):
+    update_obj = update.message_reaction
+    if not update_obj:
         return
     
-    reaction_update = update.message_reaction
-    message_id = reaction_update.message_id
-    chat_id = reaction_update.chat.id
+    message_id = update_obj.message_id
+    chat_id = str(update_obj.chat.id)
     
     if chat_id != CHANNEL_ID:
         return
@@ -65,16 +64,15 @@ async def manejar_reacciones(update: Update, context):
     estado = cargar_estado()
     
     if message_id == estado.get("message_id_actual"):
-        nueva_cuenta = reaction_update.reaction_count
+        nueva_cuenta = update_obj.reaction_count
         estado["reacciones_actuales"] = nueva_cuenta
         guardar_estado(estado)
         logging.info(f"⭐ Reacciones en Post {estado['ultimo_post_id']}: {nueva_cuenta}")
         
         if nueva_cuenta >= LIMITE_REACCIONES:
-            logging.info("🎉 Límite alcanzado! Publicando siguiente contenido...")
-            await publicar_siguiente(context)
+            logging.info("🎉 Límite alcanzado! Publicando siguiente...")
+            publicar_siguiente(context)
 
-# Servidor web
 web_app = Flask('')
 
 @web_app.route('/')
@@ -90,24 +88,24 @@ def run_web():
     web_app.run(host="0.0.0.0", port=port)
 
 def main():
-    # Iniciar servidor web en segundo plano
     web_thread = threading.Thread(target=run_web)
     web_thread.daemon = True
     web_thread.start()
     logging.info("🌐 Servidor web iniciado")
     
-    # Iniciar bot
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.ALL, manejar_reacciones))
+    updater = Updater(token=TOKEN, use_context=True)
+    dp = updater.dispatcher
     
-    # Publicar primer contenido
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.all, manejar_reacciones))
+    
     estado = cargar_estado()
     if estado["ultimo_post_id"] == 0:
-        app.job_queue.run_once(publicar_siguiente, 5)
+        updater.job_queue.run_once(publicar_siguiente, 5, context=updater)
     
     logging.info("🚀 Bot iniciado")
-    app.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
