@@ -2,84 +2,46 @@ import os
 import logging
 import json
 import threading
-import requests
 import random
+import requests
 import feedparser
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from flask import Flask
-from telegram import Bot, Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
-from datetime import datetime, timedelta
 
 TOKEN = "8991788772:AAEy4xMXBTlhr4odaVXN1DaSX1CbfMtlxEU"
 CHANNEL_ID = "-1003948185788"
+LIMITE_REACCIONES = 10
 
 logging.basicConfig(level=logging.INFO)
 ARCHIVO_ESTADO = "estado_posts.json"
-ARCHIVO_REPORTADOS = "links_reportados.json"
 
-# ========== CONFIGURACIÓN DE BÚSQUEDA ==========
-LIMITE_REACCIONES = 10  # Cambia a 50 después
-
-# Fuentes RSS de contenido
-FUENTES = {
+# URLs para buscar contenido automático
+FUENTES_RSS = {
     "ia_noticias": "https://www.artificialintelligence-news.com/feed/",
-    "tech_noticias": "https://www.xataka.com/feed",
+    "tecnologia": "https://www.xataka.com/feed",
     "reddit_ia": "https://www.reddit.com/r/ChatGPT/.rss",
-    "reddit_trucos": "https://www.reddit.com/r/AndroidTips/.rss",
-    "youtube_ia": "https://www.youtube.com/feeds/videos.xml?channel_id=UCfJgKxSJKvKQ8q9yX5ZG0JA",  # IA channel
-    "github_trending": "https://github.com/trending/python.rss",
+    "reddit_trucos": "https://www.reddit.com/r/lifehacks/.rss",
+    "reddit_mods": "https://www.reddit.com/r/ApksApps/.rss",
 }
 
-# Palabras clave para filtrar
-PALABRAS_CLAVE = [
-    "jailbreak", "chatgpt", "uncensored", "mod", "premium", "gratis",
-    "secreto", "truco", "oculto", "deepweb", "darkweb", "hack",
-    "gratuito", "desbloqueado", "viral", "nadie sabe", "filtrado",
-    "android", "whatsapp", "youtube premium", "spotify mod"
-]
+PALABRAS_CLAVE = ["jailbreak", "chatgpt", "mod", "premium", "gratis", "secreto", "truco", "oculto", "deepweb", "hack", "desbloqueado", "gratuito"]
 
-# URLs de scraping para apps mod
-MOD_SITES = [
-    "https://modyolo.com/",
-    "https://rexdl.com/",
-    "https://apkdone.com/mod-apk/"
-]
-
-# URLs de deep web
-DEEP_WEB_LINKS = [
-    "Buscador Yandex (no rastrea tu IP): https://yandex.com",
-    "Searx (100+ motores, sin logs): https://searx.space",
-    "Wayback Machine (páginas borradas): https://archive.org",
-    "Tor Metrics: https://metrics.torproject.org",
-]
-
-def cargar_json(archivo):
-    try:
-        with open(archivo, 'r') as f:
-            return json.load(f)
-    except:
-        return {}
-
-def guardar_json(archivo, datos):
-    with open(archivo, 'w') as f:
-        json.dump(datos, f)
-
-def buscar_noticias_rss():
-    """Busca noticias de las fuentes RSS"""
+def buscar_noticias():
     resultados = []
-    for nombre, url in FUENTES.items():
+    for nombre, url in FUENTES_RSS.items():
         try:
             feed = feedparser.parse(url)
-            for entrada in feed.entries[:3]:
+            for entrada in feed.entries[:5]:
+                texto_completo = (entrada.title + " " + entrada.get("description", "")).lower()
                 for palabra in PALABRAS_CLAVE:
-                    if palabra.lower() in (entrada.title + entrada.description).lower():
+                    if palabra in texto_completo:
                         resultados.append({
                             "titulo": entrada.title,
-                            "descripcion": entrada.description[:200],
+                            "descripcion": entrada.get("description", "")[:250],
                             "link": entrada.link,
-                            "fuente": nombre,
-                            "tipo": "noticia"
+                            "fuente": nombre
                         })
                         break
         except:
@@ -87,113 +49,154 @@ def buscar_noticias_rss():
     return resultados[:5]
 
 def buscar_apps_mod():
-    """Busca apps mod de sitios de APK (simulado)"""
-    mods = [
-        "YouTube ReVanced - Sin anuncios y background play",
-        "Spotify Premium MOD - Todas las canciones gratis",
-        "CapCut PRO - Todos los efectos desbloqueados",
-        "TikTok MOD - Sin publicidad y descarga de videos",
-        "WhatsApp Plus - Funciones ocultas de privacidad"
+    mods_conocidos = [
+        {"titulo": "YouTube ReVanced v19.47.53", "desc": "Sin anuncios, background play, SponsorBlock", "link": "https://revanced.net"},
+        {"titulo": "Spotify Premium Mod", "desc": "Todas las canciones gratis, sin anuncios", "link": "https://spotifypremiummod.com"},
+        {"titulo": "CapCut PRO Desbloqueado", "desc": "Todos los efectos y filtros premium gratis", "link": "https://capcutmod.com"},
+        {"titulo": "TikTok MOD", "desc": "Sin publicidad, descarga de videos sin marca", "link": "https://tiktokmod.com"},
+        {"titulo": "WhatsApp Plus", "desc": "Funciones ocultas de privacidad y personalización", "link": "https://whatsappplus.com"},
     ]
-    return [{"titulo": m, "tipo": "mod", "link": "Busca en Telegram @CodigoOculto"} for m in mods]
+    return random.sample(mods_conocidos, 3)
 
-def buscar_trucos():
-    """Busca trucos de tecnología"""
+def buscar_trucos_web():
     trucos = [
-        "WhatsApp: Activa el modo 'escritura invisible' poniendo `*texto*`",
-        "Android: Código `*#*#4636#*#*` para menú de prueba oculto",
-        "YouTube: Escribe `?v=` y borra todo para ver solo el video",
-        "Google: `site:codigooculto.com` para buscar en específico",
-        "Windows: `Ctrl + Shift + V` pega sin formato"
+        "WhatsApp: Escribe *texto* para negritas, _texto_ para cursiva, ~texto~ para tachado",
+        "Android: Marca *#*#4636#*#* para menú de prueba oculto",
+        "YouTube: Escribe ?v= y borra todo para ver solo el video",
+        "Google: Usa 'site:dominio.com' para buscar en un sitio específico",
+        "Windows: Ctrl + Shift + V pega sin formato",
+        "iPhone: Desliza el dedo por la barra espaciadora para mover el cursor",
+        "Gmail: Añade +palabra a tu correo para crear filtros automáticos",
+        "Instagram: Guarda borradores ilimitados sin publicar",
     ]
-    return [{"titulo": t, "tipo": "truco"} for t in trucos]
+    return random.sample(trucos, 3)
 
-def buscar_contenido():
-    """Junta todo el contenido de todas las fuentes"""
-    todo = []
-    todo.extend(buscar_noticias_rss())
-    todo.extend(buscar_apps_mod())
-    todo.extend(buscar_trucos())
+def buscar_deepweb():
+    enlaces = [
+        "🌐 Yandex.com - Buscador ruso que NO filtra resultados políticos",
+        "🌐 Searx.space - Agrega 100+ motores de búsqueda, sin rastreo de IP",
+        "🌐 Archive.org - Recupera páginas web BORRADAS de Internet",
+        "🌐 DuckDuckGo - Buscador que NO guarda tu historial",
+        "🌐 Startpage.com - Resultados de Google sin ser rastreado",
+    ]
+    return random.sample(enlaces, 2)
+
+def generar_contenido_automatico():
+    contenido = []
     
-    # Mezclar para que no sea siempre el mismo orden
-    random.shuffle(todo)
-    return todo[:5]  # Máximo 5 posts en la cadena
+    # Noticias IA
+    for noticia in buscar_noticias():
+        contenido.append({
+            "tipo": "🤖 NOVEDAD IA",
+            "texto": f"""🤖 **IA SIN FILTROS** - {noticia['titulo']}
 
-# Generar cadena de contenido automáticamente
-def generar_cadena_contenido():
-    contenido_nuevo = buscar_contenido()
-    cadena = []
-    for idx, item in enumerate(contentido_nuevo):
-        texto = f"""
-{'🤖 IA' if item.get('tipo') == 'noticia' else '💀 TRUCO' if item.get('tipo') == 'truco' else '📱 APP MOD'} - Parte {idx+1}
+📌 {noticia['descripcion']}
 
-📌 **{item.get('titulo', 'Novedad')}**
-
-{item.get('descripcion', 'Descubre este contenido secreto')}
-
-🔗 {item.get('link', 'Comparte y reacciona para más')}
+🔗 Fuente: {noticia['link']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⭐ **REACCIONA CON CUALQUIER EMOJI**
 
 🎁 **AL LLEGAR A {LIMITE_REACCIONES} REACCIONES:**
-- Publico más contenido como este
-- Material exclusivo para quienes reaccionan
+- MÁS contenido como este
 
-👥 **INVITA AMIGOS** a @CodigoOculto
-
-📢 **CONTENIDO REAL** buscado automáticamente de la web
-"""
-        cadena.append({"id": idx+1, "tipo": "auto", "texto": texto})
+👥 **INVITA AMIGOS** a @CodigoOculto"""
+        })
     
-    # Si no se encontró nada, usar contenido de respaldo
-    if not cadena:
-        cadena = [
-            {"id": 1, "tipo": "auto", "texto": "🤖 **IA SIN FILTROS**\n\nNuevo jailbreak para ChatGPT encontrado en Reddit.\n\n⭐ Reacciona para más contenido automático.\n\n👥 @CodigoOculto"},
-            {"id": 2, "tipo": "auto", "texto": "💀 **TRUCO OCULTO**\n\nCódigo secreto de WhatsApp que nadie conoce.\n\n⭐ Reacciona para más.\n\n👥 @CodigoOculto"},
-            {"id": 3, "tipo": "auto", "texto": "📱 **APP MOD DEL DÍA**\n\nYouTube ReVanced actualizado.\n\n⭐ Reacciona para más mods.\n\n👥 @CodigoOculto"},
-        ]
-    
-    return cadena
+    # Apps MOD
+    for mod in buscar_apps_mod():
+        contenido.append({
+            "tipo": "📱 APP MOD",
+            "texto": f"""📱 **APP MOD ACTUALIZADA** - {mod['titulo']}
 
-# ========== BOT PRINCIPAL ==========
-estado = cargar_json(ARCHIVO_ESTADO)
-CADENA_ACTUAL = estado.get("cadena", generar_cadena_contenido())
+✅ {mod['desc']}
+
+🔗 Descarga: {mod['link']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⭐ **REACCIONA PARA MÁS MODS**
+
+👥 @CodigoOculto"""
+        })
+    
+    # Trucos
+    for truco in buscar_trucos_web():
+        contenido.append({
+            "tipo": "💀 TRUCO QUE NADIE SABE",
+            "texto": f"""💀 **TRUCO OCULTO**
+
+{truco}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⭐ **REACCIONA PARA MÁS TRUCOS**
+
+👥 @CodigoOculto"""
+        })
+    
+    # Deep web
+    for deep in buscar_deepweb():
+        contenido.append({
+            "tipo": "🕳️ DEEP WEB",
+            "texto": f"""🕳️ **DEEP WEB LIGERA**
+
+{deep}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⭐ **REACCIONA PARA MÁS ENLACES**
+
+👥 @CodigoOculto"""
+        })
+    
+    random.shuffle(contenido)
+    return contenido[:8]
+
+CADENA_CONTENIDO = generar_contenido_automatico()
 
 def cargar_estado():
-    return cargar_json(ARCHIVO_ESTADO)
+    try:
+        with open(ARCHIVO_ESTADO, 'r') as f:
+            return json.load(f)
+    except:
+        return {"ultimo_post_id": 0, "message_id_actual": None, "reacciones_actuales": 0}
 
 def guardar_estado(estado):
-    guardar_json(ARCHIVO_ESTADO, estado)
+    with open(ARCHIVO_ESTADO, 'w') as f:
+        json.dump(estado, f)
 
 def publicar_siguiente(context):
+    global CADENA_CONTENIDO
     estado = cargar_estado()
-    siguiente_id = estado.get("ultimo_post_id", 0) + 1
+    siguiente_id = estado["ultimo_post_id"] + 1
     
-    if siguiente_id <= len(CADENA_ACTUAL):
-        contenido = CADENA_ACTUAL[siguiente_id - 1]
-        
-        mensaje = context.bot.send_message(
-            chat_id=CHANNEL_ID,
-            text=contenido["texto"],
-            parse_mode='Markdown'
-        )
-        
-        estado["ultimo_post_id"] = siguiente_id
-        estado["message_id_actual"] = mensaje.message_id
+    if siguiente_id > len(CADENA_CONTENIDO):
+        CADENA_CONTENIDO = generar_contenido_automatico()
+        estado = cargar_estado()
+        estado["ultimo_post_id"] = 0
+        estado["message_id_actual"] = None
         estado["reacciones_actuales"] = 0
         guardar_estado(estado)
-        logging.info(f"✅ Publicado Post {siguiente_id}")
+        siguiente_id = 1
+    
+    contenido = CADENA_CONTENIDO[siguiente_id - 1]
+    mensaje = context.bot.send_message(
+        chat_id=CHANNEL_ID,
+        text=contenido["texto"],
+        parse_mode='Markdown'
+    )
+    estado["ultimo_post_id"] = siguiente_id
+    estado["message_id_actual"] = mensaje.message_id
+    estado["reacciones_actuales"] = 0
+    guardar_estado(estado)
+    logging.info(f"✅ Publicado Post {siguiente_id} - {contenido['tipo']}")
 
 def start(update, context):
     update.message.reply_text(
         "🔓 **BOT ACTIVO**\n\n"
-        "📡 @CodigoOculto busca y publica contenido AUTOMÁTICAMENTE\n\n"
-        "✅ IA sin filtros (de Reddit y noticias)\n"
-        "✅ Trucos que NADIE sabe\n"
+        "📡 @CodigoOculto busca y publica contenido AUTOMÁTICO\n\n"
+        "✅ IA sin filtros (noticias y Reddit)\n"
         "✅ Apps MOD actualizadas\n"
-        "✅ Deep web ligera\n"
-        "✅ Novedades de la web\n\n"
+        "✅ Trucos que NADIE sabe\n"
+        "✅ Deep web ligera\n\n"
         "⭐ **REACCIONA EN CUALQUIER POST**\n\n"
         "👥 **INVITA AMIGOS** a @CodigoOculto"
     )
@@ -215,25 +218,27 @@ def manejar_reacciones(update, context):
         nueva_cuenta = update_obj.reaction_count
         estado["reacciones_actuales"] = nueva_cuenta
         guardar_estado(estado)
-        logging.info(f"⭐ Reacciones en Post {estado.get('ultimo_post_id')}: {nueva_cuenta}")
+        logging.info(f"⭐ Reacciones en Post {estado['ultimo_post_id']}: {nueva_cuenta}")
         
         if nueva_cuenta >= LIMITE_REACCIONES:
             logging.info("🎉 Límite alcanzado! Publicando siguiente contenido...")
             publicar_siguiente(context)
 
 def actualizar_contenido(context):
-    """Actualiza la cadena de contenido cada 24 horas"""
-    global CADENA_ACTUAL
+    global CADENA_CONTENIDO
     logging.info("🔄 Actualizando contenido desde la web...")
-    CADENA_ACTUAL = generar_cadena_contenido()
-    guardar_estado(cargar_estado())  # Reinicia el progreso opcionalmente
+    CADENA_CONTENIDO = generar_contenido_automatico()
+    estado = cargar_estado()
+    estado["ultimo_post_id"] = 0
+    estado["message_id_actual"] = None
+    estado["reacciones_actuales"] = 0
+    guardar_estado(estado)
 
-# ========== SERVIDOR WEB PARA RENDER ==========
 web_app = Flask('')
 
 @web_app.route('/')
 def home():
-    return "Bot @CodigoOculto funcionando con búsqueda automática 24/7"
+    return "Bot @CodigoOculto funcionando 24/7"
 
 @web_app.route('/health')
 def health():
@@ -244,25 +249,21 @@ def run_web():
     web_app.run(host="0.0.0.0", port=port)
 
 def main():
-    # Servidor web
     web_thread = threading.Thread(target=run_web)
     web_thread.daemon = True
     web_thread.start()
     logging.info("🌐 Servidor web iniciado")
     
-    # Bot
     updater = Updater(token=TOKEN, use_context=True)
     dp = updater.dispatcher
     
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.all, manejar_reacciones))
     
-    # Actualizar contenido cada 24 horas
     updater.job_queue.run_repeating(actualizar_contenido, interval=86400, first=10)
     
-    # Publicar primer contenido
-    estado_local = cargar_estado()
-    if estado_local.get("ultimo_post_id", 0) == 0:
+    estado = cargar_estado()
+    if estado["ultimo_post_id"] == 0:
         updater.job_queue.run_once(publicar_siguiente, 5, context=updater)
     
     logging.info("🚀 Bot iniciado con búsqueda automática de contenido")
