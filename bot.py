@@ -5,8 +5,6 @@ import threading
 import random
 import requests
 import feedparser
-import re
-import time
 from datetime import datetime
 from bs4 import BeautifulSoup
 from flask import Flask
@@ -14,23 +12,26 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 TOKEN = "8991788772:AAEy4xMXBTlhr4odaVXN1DaSX1CbfMtlxEU"
 CHANNEL_ID = "-1003948185788"
+CHANNEL_URL = "https://t.me/CodigoOcultoTech"
+CHANNEL_USERNAME = "@CodigoOcultoTech"
 HORAS_PUBLICACION = 2
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 ARCHIVO_ESTADO = "estado_posts.json"
 ENLACES_USADOS = "enlaces_usados.json"
+ARCHIVO_STATS = "stats.json"
 
 FUENTES_RSS = {
-    "ia": "https://www.artificialintelligence-news.com/feed/",
-    "tecnologia": "https://www.xataka.com/feed",
-    "ciencia": "https://www.bbc.com/mundo/ciencia/tecnologia/index.xml",
-    "hacks": "https://lifehacker.com/rss",
-    "android": "https://www.androidpolice.com/feed",
-    "apps_mod": "https://www.reddit.com/r/ApksApps/.rss",
-    "chatgpt": "https://www.reddit.com/r/ChatGPT/.rss",
-    "lifehacks": "https://www.reddit.com/r/lifehacks/.rss",
-    "deepweb": "https://www.reddit.com/r/deepweb/.rss",
-    "privacidad": "https://www.reddit.com/r/privacidad/.rss",
+    "Inteligencia Artificial": "https://www.artificialintelligence-news.com/feed/",
+    "Tecnología": "https://www.xataka.com/feed",
+    "Ciencia": "https://www.bbc.com/mundo/ciencia/tecnologia/index.xml",
+    "Hacks": "https://lifehacker.com/rss",
+    "Android": "https://www.androidpolice.com/feed",
+    "Apps MOD": "https://www.reddit.com/r/ApksApps/.rss",
+    "ChatGPT": "https://www.reddit.com/r/ChatGPT/.rss",
+    "Lifehacks": "https://www.reddit.com/r/lifehacks/.rss",
+    "Deep Web": "https://www.reddit.com/r/deepweb/.rss",
+    "Privacidad": "https://www.reddit.com/r/privacidad/.rss",
 }
 
 PALABRAS_CLAVE = [
@@ -45,6 +46,8 @@ def cargar_json(archivo):
         with open(archivo, 'r') as f:
             return json.load(f)
     except:
+        if archivo == ARCHIVO_STATS:
+            return {"posts_publicados": 0, "reacciones_totales": 0, "inicio": datetime.now().isoformat()}
         return {} if archivo == ENLACES_USADOS else {"ultimo_post_id": 0, "reacciones_actuales": 0}
 
 def guardar_json(archivo, datos):
@@ -61,7 +64,7 @@ def enlace_ya_usado(url):
 
 def buscar_noticias():
     resultados = []
-    for nombre, url in FUENTES_RSS.items():
+    for fuente, url in FUENTES_RSS.items():
         try:
             feed = feedparser.parse(url)
             for entrada in feed.entries[:3]:
@@ -69,11 +72,11 @@ def buscar_noticias():
                 if any(palabra in texto for palabra in PALABRAS_CLAVE):
                     if not enlace_ya_usado(entrada.link):
                         resultados.append({
-                            "tipo": "noticia",
+                            "tipo": "📰 NOTICIA",
+                            "fuente": fuente,
                             "titulo": entrada.title,
                             "texto": entrada.get("description", "")[:300],
                             "link": entrada.link,
-                            "fuente": nombre
                         })
         except:
             continue
@@ -83,14 +86,14 @@ def buscar_videos_youtube():
     resultados = []
     try:
         from youtubesearchpython import VideosSearch
-        busquedas = ["trucos android", "apps mod", "ia jailbreak", "whatsapp secreto", "deepweb tutorial", "youtube premium hack"]
+        busquedas = ["trucos android", "apps mod", "ia jailbreak", "whatsapp secreto", "deepweb tutorial"]
         busqueda = random.choice(busquedas)
         videosSearch = VideosSearch(busqueda, limit=2)
         resultados_busqueda = videosSearch.result()
         for video in resultados_busqueda.get('result', []):
             if not enlace_ya_usado(video['link']):
                 resultados.append({
-                    "tipo": "video",
+                    "tipo": "🎬 VIDEO",
                     "titulo": video['title'],
                     "texto": video.get('description', '')[:200],
                     "link": video['link'],
@@ -102,7 +105,7 @@ def buscar_videos_youtube():
 
 def buscar_imagenes():
     resultados = []
-    busquedas = ["tecnologia secreta", "hack android", "ia future", "deepweb", "mod apk", "trucos whatsapp"]
+    busquedas = ["tecnologia secreta", "hack android", "ia future", "deepweb", "mod apk"]
     busqueda = random.choice(busquedas)
     try:
         url = f"https://www.bing.com/images/search?q={busqueda.replace(' ', '+')}&first=1"
@@ -114,10 +117,10 @@ def buscar_imagenes():
             img_url = img.get('src')
             if img_url and img_url.startswith('http') and not enlace_ya_usado(img_url):
                 resultados.append({
-                    "tipo": "imagen",
+                    "tipo": "🖼️ IMAGEN",
                     "titulo": f"Imagen sobre {busqueda}",
                     "link": img_url,
-                    "texto": f"🖼️ **{busqueda.title()}**"
+                    "texto": f"**{busqueda.title()}**"
                 })
                 break
     except:
@@ -127,18 +130,16 @@ def buscar_imagenes():
 def buscar_apps_mod():
     resultados = []
     mods_conocidos = [
-        {"titulo": "YouTube ReVanced v19.47.53", "desc": "Sin anuncios, background play, SponsorBlock", "link": "https://revanced.net"},
+        {"titulo": "YouTube ReVanced", "desc": "Sin anuncios, background play, SponsorBlock", "link": "https://revanced.net"},
         {"titulo": "Spotify Premium Mod", "desc": "Todas las canciones gratis, sin anuncios", "link": "https://spotifypremiummod.com"},
-        {"titulo": "CapCut PRO Desbloqueado", "desc": "Todos los efectos y filtros premium gratis", "link": "https://capcutmod.com"},
+        {"titulo": "CapCut PRO", "desc": "Todos los efectos y filtros premium gratis", "link": "https://capcutmod.com"},
         {"titulo": "TikTok MOD", "desc": "Sin publicidad, descarga de videos sin marca", "link": "https://tiktokmod.com"},
-        {"titulo": "WhatsApp Plus", "desc": "Funciones ocultas de privacidad y personalizacion", "link": "https://whatsappplus.com"},
-        {"titulo": "XManager Spotify", "desc": "Spotify premium sin pagar", "link": "https://xmanagerapp.com"},
-        {"titulo": "Instander", "desc": "Instagram sin publicidad y descarga de fotos", "link": "https://thedise.me/instander"},
+        {"titulo": "WhatsApp Plus", "desc": "Funciones ocultas de privacidad", "link": "https://whatsappplus.com"},
     ]
     for mod in random.sample(mods_conocidos, 2):
         if not enlace_ya_usado(mod['link']):
             resultados.append({
-                "tipo": "app_mod",
+                "tipo": "📱 APP MOD",
                 "titulo": mod['titulo'],
                 "texto": mod['desc'],
                 "link": mod['link']
@@ -147,34 +148,34 @@ def buscar_apps_mod():
 
 def buscar_trucos():
     trucos = [
-        "WhatsApp: Escribe *texto* para negritas, _texto_ para cursiva, ~texto~ para tachado",
-        "Android: Marca *#*#4636#*#* para menu de prueba oculto",
-        "YouTube: Escribe ?v= y borra todo para ver solo el video",
-        "Google: Usa 'site:dominio.com' para buscar en un sitio especifico",
-        "Windows: Ctrl + Shift + V pega sin formato",
-        "iPhone: Desliza el dedo por la barra espaciadora para mover el cursor",
-        "Gmail: Anade +palabra a tu correo para crear filtros automaticos",
-        "Instagram: Guarda borradores ilimitados sin publicar",
-        "Netflix: Usa codigos secretos (ej: 1365 para Accion) en la URL",
-        "Spotify: Crea playlist colaborativas con cualquier usuario",
+        "**WhatsApp:** Escribe *texto* para negritas, _texto_ para cursiva, ~texto~ para tachado",
+        "**Android:** Marca `*#*#4636#*#*` para menú de prueba oculto",
+        "**YouTube:** Escribe `?v=` y borra todo para ver solo el video",
+        "**Google:** Usa `site:dominio.com` para buscar en un sitio específico",
+        "**Windows:** `Ctrl + Shift + V` pega sin formato",
+        "**iPhone:** Desliza el dedo por la barra espaciadora para mover el cursor",
+        "**Gmail:** Añade `+palabra` a tu correo para crear filtros automáticos",
+        "**Instagram:** Guarda borradores ilimitados sin publicar",
+        "**Netflix:** Usa códigos secretos en la URL (ej: 1365 para Acción)",
+        "**Spotify:** Crea playlists colaborativas con cualquier usuario",
     ]
     truco_elegido = random.choice(trucos)
     if not enlace_ya_usado(truco_elegido[:50]):
-        return [{"tipo": "truco", "titulo": "Truco que nadie sabe", "texto": truco_elegido}]
+        return [{"tipo": "💡 TRUCO", "titulo": "Truco que nadie sabe", "texto": truco_elegido}]
     return []
 
 def buscar_deepweb():
     enlaces = [
-        {"titulo": "Yandex", "desc": "Buscador ruso que NO filtra resultados politicos", "link": "https://yandex.com"},
-        {"titulo": "Searx", "desc": "Agrega 100+ motores de busqueda, sin rastreo de IP", "link": "https://searx.space"},
-        {"titulo": "Wayback Machine", "desc": "Recupera paginas web BORRADAS de Internet", "link": "https://archive.org"},
+        {"titulo": "Yandex", "desc": "Buscador ruso que NO filtra resultados políticos", "link": "https://yandex.com"},
+        {"titulo": "Searx", "desc": "Agrega 100+ motores de búsqueda, sin rastreo de IP", "link": "https://searx.space"},
+        {"titulo": "Wayback Machine", "desc": "Recupera páginas web BORRADAS de Internet", "link": "https://archive.org"},
         {"titulo": "DuckDuckGo", "desc": "Buscador que NO guarda tu historial", "link": "https://duckduckgo.com"},
         {"titulo": "Startpage", "desc": "Resultados de Google sin ser rastreado", "link": "https://startpage.com"},
         {"titulo": "Tor Project", "desc": "Navegador para acceso a la deep web (uso educativo)", "link": "https://torproject.org"},
     ]
     deep = random.choice(enlaces)
     if not enlace_ya_usado(deep['link']):
-        return [{"tipo": "deepweb", "titulo": deep['titulo'], "texto": deep['desc'], "link": deep['link']}]
+        return [{"tipo": "🌐 DEEP WEB", "titulo": deep['titulo'], "texto": deep['desc'], "link": deep['link']}]
     return []
 
 def generar_contenido_completo():
@@ -186,7 +187,7 @@ def generar_contenido_completo():
     contenido.extend(buscar_trucos())
     contenido.extend(buscar_deepweb())
     if not contenido:
-        contenido = [{"tipo": "info", "titulo": "Buscando contenido...", "texto": "🔍 El bot esta buscando nuevo contenido.", "link": None}]
+        contenido = [{"tipo": "📡 INFO", "titulo": "Buscando contenido...", "texto": "El bot está buscando nuevo contenido.", "link": CHANNEL_URL}]
     random.shuffle(contenido)
     return contenido[:10]
 
@@ -194,81 +195,100 @@ CADENA_CONTENIDO = generar_contenido_completo()
 indice_actual = 0
 
 def formatear_post(item):
-    base = f"""━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    pie = f"""━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⭐ **REACCIONA CON CUALQUIER EMOJI**
+📢 **MÁS CONTENIDO CADA {HORAS_PUBLICACION} HORAS**
 
-🎁 **MAS CONTENIDO CADA {HORAS_PUBLICACION} HORAS**
-
-👥 **INVITA AMIGOS** a @CodigoOculto
+👥 **ÚNETE A NUESTRA COMUNIDAD**
+🔗 {CHANNEL_URL}
 
 📢 **FIN EDUCATIVO** - Contenido informativo"""
     
-    if item['tipo'] == "video":
-        return f"""📹 **VIDEO ENCONTRADO**
+    titulo_tipo = item.get('tipo', '📡 NOVEDAD')
+    
+    if item['tipo'] == "🎬 VIDEO":
+        return f"""{titulo_tipo}
 
-🎬 **{item['titulo']}**
+**🎬 {item['titulo']}**
 
 {item['texto']}
 
-🔗 Ver video: {item['link']}
+▶️ **Ver video:** {item['link']}
 
-{base}"""
+{pie}"""
     
-    elif item['tipo'] == "imagen":
-        return f"""🖼️ **IMAGEN ENCONTRADA**
+    elif item['tipo'] == "🖼️ IMAGEN" and item.get('link'):
+        return f"""{titulo_tipo}
 
 {item['texto']}
 
-{base}"""
+{pie}"""
     
-    elif item['tipo'] == "app_mod":
-        return f"""📱 **APP MOD ACTUALIZADA**
+    elif item['tipo'] == "📱 APP MOD":
+        return f"""{titulo_tipo}
 
-🔥 **{item['titulo']}**
+**🔥 {item['titulo']}**
 
 ✅ {item['texto']}
 
-🔗 Descarga: {item['link']}
+📥 **Descarga:** {item['link']}
 
-{base}
+{pie}
 
-⚠️ FINES EDUCATIVOS"""
+⚠️ **FIN EDUCATIVO** - Instala bajo tu responsabilidad"""
     
-    elif item['tipo'] == "deepweb":
-        return f"""🕳️ **DEEP WEB LIGERA - USO EDUCATIVO**
+    elif item['tipo'] == "🌐 DEEP WEB":
+        return f"""{titulo_tipo} - USO EDUCATIVO
 
-🌐 **{item['titulo']}**
+**🌐 {item['titulo']}**
 
 {item['texto']}
 
 🔗 {item['link']}
 
-{base}"""
+{pie}"""
     
-    elif item['tipo'] == "truco":
-        return f"""💀 **TRUCO QUE NADIE SABE**
+    elif item['tipo'] == "💡 TRUCO":
+        return f"""{titulo_tipo}
 
 {item['texto']}
 
-{base}"""
+{pie}"""
     
     else:
-        return f"""🤖 **{item.get('titulo', 'NOVEDAD')}**
+        fuente = item.get('fuente', '')
+        return f"""{titulo_tipo} {('de ' + fuente) if fuente else ''}
+
+**📌 {item.get('titulo', 'NOVEDAD')}**
 
 {item.get('texto', '')}
 
-🔗 {item.get('link', 'Comparte y reacciona')}
+🔗 **Fuente:** {item.get('link', CHANNEL_URL)}
 
-{base}"""
+{pie}"""
 
 def publicar_con_media(context, item):
     try:
-        if item['tipo'] == "imagen" and item.get('link'):
-            return context.bot.send_photo(chat_id=CHANNEL_ID, photo=item['link'], caption=formatear_post(item), parse_mode='Markdown')
+        if item['tipo'] == "🖼️ IMAGEN" and item.get('link'):
+            return context.bot.send_photo(
+                chat_id=CHANNEL_ID, 
+                photo=item['link'], 
+                caption=formatear_post(item), 
+                parse_mode='Markdown'
+            )
         else:
-            return context.bot.send_message(chat_id=CHANNEL_ID, text=formatear_post(item), parse_mode='Markdown')
-    except:
-        return context.bot.send_message(chat_id=CHANNEL_ID, text=formatear_post(item), parse_mode='Markdown')
+            return context.bot.send_message(
+                chat_id=CHANNEL_ID, 
+                text=formatear_post(item), 
+                parse_mode='Markdown'
+            )
+    except Exception as e:
+        logging.error(f"Error publicando: {e}")
+        return context.bot.send_message(
+            chat_id=CHANNEL_ID, 
+            text=formatear_post(item), 
+            parse_mode='Markdown'
+        )
 
 def publicar_siguiente(context):
     global CADENA_CONTENIDO, indice_actual
@@ -276,8 +296,14 @@ def publicar_siguiente(context):
         logging.info("🔄 Generando nuevo contenido...")
         CADENA_CONTENIDO = generar_contenido_completo()
         indice_actual = 0
+    
     item = CADENA_CONTENIDO[indice_actual]
     publicar_con_media(context, item)
+    
+    stats = cargar_json(ARCHIVO_STATS)
+    stats["posts_publicados"] = stats.get("posts_publicados", 0) + 1
+    guardar_json(ARCHIVO_STATS, stats)
+    
     logging.info(f"✅ Publicado Post {indice_actual + 1} - Tipo: {item['tipo']}")
     indice_actual += 1
 
@@ -285,18 +311,55 @@ def publicacion_programada(context):
     publicar_siguiente(context)
 
 def start(update, context):
+    stats = cargar_json(ARCHIVO_STATS)
     update.message.reply_text(
-        f"🔓 **BOT ACTIVO - FINES EDUCATIVOS**\n\n"
-        f"📡 @CodigoOculto publica contenido CADA {HORAS_PUBLICACION} HORAS\n\n"
-        f"✅ IA sin filtros\n✅ Apps MOD actualizadas\n✅ Trucos que NADIE sabe\n✅ Deep web ligera\n✅ Videos e imagenes\n\n"
-        f"⭐ **REACCIONA EN CUALQUIER POST**\n\n👥 **INVITA AMIGOS** a @CodigoOculto"
+        f"""🔓 **CÓDIGO OCULTO - BOT PROFESIONAL**
+
+📡 **{CHANNEL_USERNAME}** - Contenido exclusivo
+
+📊 **ESTADÍSTICAS:**
+• Posts publicados: {stats.get('posts_publicados', 0)}
+• Reacciones totales: {stats.get('reacciones_totales', 0)}
+• Desde: {stats.get('inicio', 'hoy')}
+
+⚙️ **CONFIGURACIÓN:**
+• Publicación automática: cada {HORAS_PUBLICACION} horas
+• Búsqueda de contenido: continua
+
+📂 **CATEGORÍAS:**
+• 🤖 IA sin filtros
+• 📱 Apps MOD actualizadas
+• 💡 Trucos que NADIE sabe
+• 🌐 Deep web ligera
+• 🎬 Videos e imágenes
+
+⭐ **REACCIONA EN CUALQUIER POST**
+
+👥 **COMPARTE:** {CHANNEL_URL}"""
+    )
+
+def stats_command(update, context):
+    stats = cargar_json(ARCHIVO_STATS)
+    update.message.reply_text(
+        f"""📊 **ESTADÍSTICAS DE {CHANNEL_USERNAME}**
+
+📝 Posts publicados: {stats.get('posts_publicados', 0)}
+⭐ Reacciones totales: {stats.get('reacciones_totales', 0)}
+📅 Activo desde: {stats.get('inicio', 'hoy')}
+⏱️ Frecuencia: cada {HORAS_PUBLICACION} horas
+
+🔗 {CHANNEL_URL}"""
     )
 
 def manejar_reacciones(update, context):
     update_obj = update.message_reaction
     if not update_obj:
         return
-    logging.info(f"⭐ Reacción detectada: {update_obj.reaction_count}")
+    
+    stats = cargar_json(ARCHIVO_STATS)
+    stats["reacciones_totales"] = stats.get("reacciones_totales", 0) + 1
+    guardar_json(ARCHIVO_STATS, stats)
+    logging.info(f"⭐ Reacción detectada - Total: {stats['reacciones_totales']}")
 
 def actualizar_contenido(context):
     global CADENA_CONTENIDO, indice_actual
@@ -308,7 +371,10 @@ web_app = Flask('')
 
 @web_app.route('/')
 def home():
-    return f"Bot @CodigoOculto - Publica cada {HORAS_PUBLICACION} horas - Fines Educativos"
+    return f"""Bot Código Oculto - Profesional
+    Canal: {CHANNEL_URL}
+    Publica cada {HORAS_PUBLICACION} horas
+    Estado: Activo 24/7"""
 
 @web_app.route('/health')
 def health():
@@ -323,14 +389,19 @@ def main():
     web_thread.daemon = True
     web_thread.start()
     logging.info("🌐 Servidor web iniciado")
+    
     updater = Updater(token=TOKEN, use_context=True)
     dp = updater.dispatcher
+    
     dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("stats", stats_command))
     dp.add_handler(MessageHandler(Filters.all, manejar_reacciones))
+    
     segundos = HORAS_PUBLICACION * 3600
     updater.job_queue.run_repeating(publicacion_programada, interval=segundos, first=10)
     updater.job_queue.run_repeating(actualizar_contenido, interval=86400, first=10)
-    logging.info(f"🚀 Bot iniciado - Publica cada {HORAS_PUBLICACION} horas")
+    
+    logging.info(f"🚀 Bot Código Oculto iniciado - Publica cada {HORAS_PUBLICACION} horas - {CHANNEL_URL}")
     updater.start_polling()
     updater.idle()
 
